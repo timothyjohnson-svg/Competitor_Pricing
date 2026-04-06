@@ -3,13 +3,18 @@ import { licensingRequirements } from '@/db/schema';
 import { and, eq, sql } from 'drizzle-orm';
 import { NextResponse, type NextRequest } from 'next/server';
 
+// Two-letter state code: letters only, max 2 chars
+const STATE_RE = /^[A-Z]{2}$/;
+// Line of authority slug: lowercase letters and hyphens only, max 40 chars
+const LINE_RE = /^[a-z-]{1,40}$/;
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const state = searchParams.get('state');
-  const line = searchParams.get('line');
+  const rawState = searchParams.get('state');
+  const rawLine = searchParams.get('line');
 
   // If no params, return distinct states with comingSoon status
-  if (!state) {
+  if (!rawState) {
     const rows = await db
       .select({
         state: licensingRequirements.state,
@@ -18,13 +23,20 @@ export async function GET(request: NextRequest) {
       })
       .from(licensingRequirements)
       .groupBy(licensingRequirements.state, licensingRequirements.stateName)
-      .orderBy(licensingRequirements.stateName);
+      .orderBy(licensingRequirements.stateName)
+      .limit(60); // max ~50 US states + territories
 
     return NextResponse.json({ states: rows });
   }
 
+  // Validate state param
+  const state = rawState.toUpperCase();
+  if (!STATE_RE.test(state)) {
+    return NextResponse.json({ error: 'Invalid state code.' }, { status: 400 });
+  }
+
   // If state but no line, return available lines for that state
-  if (state && !line) {
+  if (!rawLine) {
     const rows = await db
       .select({
         lineOfAuthority: licensingRequirements.lineOfAuthority,
@@ -32,22 +44,29 @@ export async function GET(request: NextRequest) {
         comingSoon: licensingRequirements.comingSoon,
       })
       .from(licensingRequirements)
-      .where(eq(licensingRequirements.state, state.toUpperCase()))
-      .orderBy(licensingRequirements.lineOfAuthorityLabel);
+      .where(eq(licensingRequirements.state, state))
+      .orderBy(licensingRequirements.lineOfAuthorityLabel)
+      .limit(20); // max lines of authority per state
 
     return NextResponse.json({ lines: rows });
   }
 
-  // If both, return the full requirement
+  // Validate line param
+  if (!LINE_RE.test(rawLine)) {
+    return NextResponse.json({ error: 'Invalid line of authority.' }, { status: 400 });
+  }
+
+  // Return the full requirement
   const rows = await db
     .select()
     .from(licensingRequirements)
     .where(
       and(
-        eq(licensingRequirements.state, state.toUpperCase()),
-        eq(licensingRequirements.lineOfAuthority, line!),
+        eq(licensingRequirements.state, state),
+        eq(licensingRequirements.lineOfAuthority, rawLine),
       ),
-    );
+    )
+    .limit(1);
 
   if (rows.length === 0) {
     return NextResponse.json(

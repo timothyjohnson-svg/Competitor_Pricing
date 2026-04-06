@@ -72,13 +72,14 @@ export function LicensingWizard() {
   const [selectedPersona, setSelectedPersona] = useState<PersonaKey | null>(null);
   const [requirement, setRequirement] = useState<LicensingRequirement | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Fetch available states on mount
   useEffect(() => {
     fetch('/api/licensing-requirements')
       .then((r) => r.json())
       .then((data: { states: StateOption[] }) => setStates(data.states ?? []))
-      .catch(() => {/* graceful */});
+      .catch(() => setError('Could not load states. Please refresh and try again.'));
   }, []);
 
   // Fetch lines when state changes
@@ -86,22 +87,30 @@ export function LicensingWizard() {
     if (!selectedState) return;
     setLines([]);
     setSelectedLine('');
-    fetch(`/api/licensing-requirements?state=${selectedState}`)
+    setError(null);
+    const params = new URLSearchParams({ state: selectedState });
+    fetch(`/api/licensing-requirements?${params.toString()}`)
       .then((r) => r.json())
       .then((data: { lines: LineOption[] }) => setLines(data.lines ?? []))
-      .catch(() => {/* graceful */});
+      .catch(() => setError('Could not load license types. Please refresh and try again.'));
   }, [selectedState]);
 
   // Fetch full requirement
   const fetchRequirement = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch(
-        `/api/licensing-requirements?state=${selectedState}&line=${selectedLine}`,
-      );
+      const params = new URLSearchParams({ state: selectedState, line: selectedLine });
+      const res = await fetch(`/api/licensing-requirements?${params.toString()}`);
+      if (!res.ok) {
+        setError('Could not load licensing requirements. Please try again.');
+        return;
+      }
       const data = (await res.json()) as { requirement: LicensingRequirement };
       setRequirement(data.requirement ?? null);
       setStep(4);
+    } catch {
+      setError('Could not load licensing requirements. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -171,6 +180,13 @@ export function LicensingWizard() {
       <div className="max-w-[720px] mx-auto -mt-6 px-4 pb-16">
         <div className="rounded-xl bg-white shadow-[0_8px_12px_rgba(34,34,34,0.1)] p-6 sm:p-10">
           <StepIndicator />
+
+          {/* ---- Error banner ---- */}
+          {error && (
+            <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
 
           {/* ---- Step 1: State ---- */}
           {step === 1 && (
